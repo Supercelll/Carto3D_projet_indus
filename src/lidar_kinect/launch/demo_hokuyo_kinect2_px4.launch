@@ -1,0 +1,131 @@
+
+<launch>
+
+ <!-- Hokuyo node -->
+   <node name="urg_node" pkg="urg_node" type="urg_node" output="screen">
+    <param name="ip_address" value=""/>
+    <param name="serial_port" value="/dev/ttyACM0"/>
+    <param name="serial_baud" value="115200"/>
+    <param name="frame_id" value="/laser"/>
+    <param name="calibrate_time" value="true"/>
+    <param name="publish_intensity" value="false"/>
+    <param name="publish_multiecho" value="false"/>
+    <param name="angle_min" value="-1.5707963"/>
+    <param name="angle_max" value="1.5707963"/>
+  </node>
+
+  <!-- HECTOR MAPPING VERSION: use this with ROS bag demo_mapping_no_odom.bag generated  -->
+  <!--                         from demo_mapping.bag with:                               -->
+  <!-- rosbag filter demo_mapping.bag demo_mapping_no_odom.bag 'topic != "/tf" or topic == "/tf" and m.transforms[0].header.frame_id != "/odom"' -->
+  <!-- WARNING : Database is automatically deleted on each startup                       -->
+  <!--           See "delete_db_on_start" option below...                                -->
+  
+  <!-- Choose visualization -->
+  <arg name="rviz" default="true" />
+  <arg name="rtabmapviz" default="false" />
+
+  <!-- <param name="use_sim_time" type="bool" value="True"/> -->
+  
+  <!-- <node pkg="tf" type="static_transform_publisher" name="scanmatcher_to_base_footprint" 
+    args="0.0 0.0 0.0 0.0 0.0 0.0 /scanmatcher_frame /base_footprint 100" /> -->
+  <node pkg="tf" type="static_transform_publisher" name="laser_to_base_footprint" 
+    args="0.0 0.0 0.0 3.14157 0.0 0.0 /base_stabilized /laser 100" />
+  <node pkg="tf" type="static_transform_publisher" name="kinect2_to_base_footprint"
+    args="0.0 0.0 0.0 -1.5707963267948966 0.0 -1.5707963267948966 /base_stabilized /kinect2_link 100" />
+
+  <node pkg="lidar_kinect" type="altitude_tf" name="altitude_tf"/>
+
+  <!-- Odometry from laser scans -->
+  <!-- We use Hector mapping to generate odometry for us -->
+  <node pkg="hector_mapping" type="hector_mapping" name="hector_mapping" output="screen">
+    
+    <!-- Frame names -->
+    <param name="map_frame" value="hector_map" />
+    <param name="base_frame" value="base_footprint" />
+    <param name="odom_frame" value="base_footprint" />
+    
+    <!-- Tf use -->
+    <param name="pub_map_odom_transform" value="true"/>
+    <param name="pub_map_scanmatch_transform" value="true"/>
+    <param name="pub_odometry" value="true"/>
+
+    <param name="output_timing" value="false"/>
+    <param name="use_tf_scan_transformation" value="true"/>
+    
+    <!-- Map size / start point -->
+    <param name="map_resolution" value="0.050"/>
+    <param name="map_size" value="2048"/>
+    <param name="map_multi_res_levels" value="2" />
+
+    <param name="laser_z_min_value" value="-2.5" />
+    <param name="laser_z_max_value" value="3.5" />
+    
+    <!-- Map update parameters -->
+    <param name="map_update_angle_thresh" value="0.06" />
+    
+    <!-- Advertising config --> 
+    <param name="scan_topic" value="/scan"/>
+  </node>
+
+  <group ns="rtabmap">
+    <!-- SLAM (robot side) -->
+    <!-- args: "delete_db_on_start" and "udebug" -->
+    <node name="rtabmap" pkg="rtabmap_ros" type="rtabmap" output="screen" args="--delete_db_on_start">
+	  <param name="frame_id" type="string" value="base_footprint"/>
+	
+	  <param name="subscribe_depth" type="bool" value="true"/>
+	  <param name="subscribe_scan"  type="bool" value="true"/>
+	
+	  <remap from="odom" to="/scanmatch_odom"/>
+	  <remap from="scan" to="/scan"/>
+
+	  <remap from="rgb/image"       to="/kinect2/hd/image_color_rect"/>
+  	  <remap from="depth/image"     to="/kinect2/hd/image_depth_rect"/>
+  	  <remap from="rgb/camera_info" to="/kinect2/hd/camera_info"/>
+  	
+      <param name="rgb/image_transport" type="string" value="compressed"/>
+      <param name="depth/image_transport" type="string" value="compressed"/> <!-- compressedDepth -->
+	
+	  <!-- RTAB-Map's parameters -->
+	  <param name="Reg/Strategy"       type="string" value="2"/>    <!-- 0=Visual, 1=ICP, 2=Visual+ICP -->
+	  <param name="Vis/MaxDepth"       type="string" value="10.0"/> <!-- 3D visual words maximum depth 0=infinity -->
+	  <param name="Vis/InlierDistance" type="string" value="0.1"/>  <!-- 3D visual words correspondence distance -->
+	  <param name="Optimizer/Slam2D"   type="string" value="true"/>
+	  <param name="Reg/Force3DoF"      type="string" value="false"/>
+      <param name="RGBD/NeighborLinkRefining" type="string" value="true"/>
+    </node>
+    
+    <!-- Visualisation RTAB-Map -->
+    <node if="$(arg rtabmapviz)" pkg="rtabmap_ros" type="rtabmapviz" name="rtabmapviz" args="-d $(find rtabmap_ros)/launch/config/rgbd_gui.ini" output="screen">
+  	  <param name="subscribe_depth"     type="bool" value="true"/>
+      <param name="subscribe_laserScan" type="bool" value="true"/>
+      <param name="frame_id"            type="string" value="base_footprint"/>
+    
+      <remap from="rgb/image"       to="/kinect2/hd/image_color_rect"/>
+      <remap from="depth/image"     to="/kinect2/hd/image_depth_rect"/>
+      <remap from="rgb/camera_info" to="/kinect2/hd/camera_info"/>
+      <remap from="scan"            to="/scan"/>
+      <remap from="odom"            to="/scanmatch_odom"/>
+      
+      <param name="rgb/image_transport"   type="string" value="compressed"/>
+      <param name="depth/image_transport" type="string" value="compressed"/> <!-- compressedDepth -->
+    </node>
+  
+  </group>
+  
+  <!-- Visualisation RVIZ -->
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" args="-d $(find rtabmap_ros)/launch/config/demo_robot_mapping.rviz" output="screen"/>
+   <node pkg="nodelet" type="nodelet" name="points_xyzrgb" args="standalone rtabmap_ros/point_cloud_xyzrgb">
+    <remap from="rgb/image"       to="/kinect2/hd/image_color_rect"/>
+    <remap from="depth/image"     to="/kinect2/hd/image_depth_rect"/>
+    <remap from="rgb/camera_info" to="/kinect2/hd/camera_info"/>
+    <remap from="cloud"           to="voxel_cloud" />
+    
+    <param name="rgb/image_transport"   type="string" value="compressed"/>
+    <param name="depth/image_transport" type="string" value="compressed"/> <!-- compressedDepth -->
+
+    <param name="voxel_size" type="double" value="0.01"/>
+  </node>
+
+</launch>
+
